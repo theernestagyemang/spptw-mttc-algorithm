@@ -254,10 +254,10 @@ def backward_pass(final_state):
         interval_k = chain[k][1]
         t_min_k = chain[k][2]  # cost to advance FROM zone k TO zone k+1
         candidate = times[k + 1] - t_min_k
-        if interval_k[0] <= candidate <= interval_k[1]:
-            times[k] = candidate
-        else:
-            times[k] = interval_k[1]  # "cannot meet the interval" -> use its ending time
+        # clamp into the interval: "cannot meet the interval" -> use its ending
+        # time when too late; clamping below also absorbs float round-off
+        # (e.g. 240.8999... vs 240.9), which must not jump to the interval end
+        times[k] = min(max(candidate, interval_k[0]), interval_k[1])
     return [(chain[i][0], times[i]) for i in range(n)]
 
 
@@ -297,7 +297,7 @@ def validate_conflict_free(reservations, buffer=SEPARATION_BUFFER_S):
 
 
 # ============================================================
-# 7. PLOTS (built live from the actual run - not hardcoded)
+# 7. PLOTS 
 # ============================================================
 def _zone_label(zone):
     return zone if isinstance(zone, str) else "-".join(sorted(zone))
@@ -411,6 +411,7 @@ def run_demo():
     ]
 
     flight_summaries = []  # collected live, used by the plots below - never hardcoded
+    sim_results = {}       # flight_id -> planned trajectory, used by the live simulation
 
     for flight_id, start, end, ready_time in aircraft_list:
         print(f"\nRouting {flight_id} (ready at T={ready_time}s)...")
@@ -433,6 +434,7 @@ def run_demo():
             "aircraft_id": flight_id, "ready_time": ready_time,
             "pushback_time": pushback_time, "completion_time": completion_time,
         })
+        sim_results[flight_id] = {"ready_time": ready_time, "start": start, "timed_chain": timed_chain}
 
     print("\n--- Final Reservation Schedule ---")
     for zone, windows in reservations.reservations.items():
@@ -449,16 +451,19 @@ def run_demo():
     else:
         print("PASSED - no separation violations across all committed trajectories.")
 
-    print("\n--- Generating plots ---")
-    plot_network(G, gate_nodes, goal, save_path="network_diagram.png")
-    plot_gantt(reservations, gate_nodes, save_path="schedule_gantt.png")
-    if flight_summaries:
-        plot_gate_hold_vs_taxi(flight_summaries, save_path="gate_hold_vs_taxi.png")
+    # print("\n--- Generating plots ---")
+    # plot_network(G, gate_nodes, goal, save_path="network_diagram.png")
+    # plot_gantt(reservations, gate_nodes, save_path="schedule_gantt.png")
+    # if flight_summaries:
+    #     plot_gate_hold_vs_taxi(flight_summaries, save_path="gate_hold_vs_taxi.png")
 
+    print("\n--- Running live simulation (close the window to exit) ---")
+    from taxi_simulation import animate  # imported here: taxi_simulation imports this module
+    anim = animate(G, sim_results, gate_nodes, goal)  # keep a reference or the animation stops
     try:
         plt.show()
     except Exception as e:
-        print(f"(Could not open an interactive window: {e}. The PNG files above were still saved to disk.)")
+        print(f"(Could not open an interactive window: {e}.)")
 
 
 if __name__ == "__main__":
